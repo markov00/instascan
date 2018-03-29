@@ -3,6 +3,8 @@ function cameraName(label) {
   return clean || label || null;
 }
 
+
+
 class MediaError extends Error {
   constructor(type) {
     super(`Cannot access video stream (${type}).`);

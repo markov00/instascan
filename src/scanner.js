@@ -1,7 +1,8 @@
 const EventEmitter = require('events');
-const ZXing = require('./zxing')();
+// const ZXing = require('./zxing')();
 const Visibility = require('visibilityjs');
 const StateMachine = require('fsm-as-promised');
+const ZXingWorker = new Worker('../src/worker2.js');
 
 class ScanProvider {
   constructor(emitter, analyzer, captureImage, scanPeriod, refractoryPeriod) {
@@ -13,6 +14,13 @@ class ScanProvider {
     this._analyzer = analyzer;
     this._lastResult = null;
     this._active = false;
+
+    ZXingWorker.onmessage = (e) => {
+      setTimeout(() => {
+        this._emitter.emit('scan', e.data);
+      }, 0)
+
+    }
   }
 
   start() {
@@ -30,34 +38,6 @@ class ScanProvider {
 
   _analyze(skipDups) {
     let analysis = this._analyzer.analyze();
-    if (!analysis) {
-      return null;
-    }
-
-    let { result, canvas } = analysis;
-    if (!result) {
-      return null;
-    }
-
-    if (skipDups && result === this._lastResult) {
-      return null;
-    }
-
-    clearTimeout(this.refractoryTimeout);
-    this.refractoryTimeout = setTimeout(() => {
-      this._lastResult = null;
-    }, this.refractoryPeriod);
-
-    let image = this.captureImage ? canvas.toDataURL('image/webp', 0.8) : null;
-
-    this._lastResult = result;
-
-    let payload = { content: result };
-    if (image) {
-      payload.image = image;
-    }
-
-    return payload;
   }
 
   _scan() {
@@ -73,12 +53,7 @@ class ScanProvider {
       this._frameCount = 0;
     }
 
-    let result = this._analyze(true);
-    if (result) {
-      setTimeout(() => {
-        this._emitter.emit('scan', result.content, result.image || null);
-      }, 0);
-    }
+    this._analyze(true);
   }
 }
 
@@ -95,15 +70,6 @@ class Analyzer {
     this.canvas = document.createElement('canvas');
     this.canvas.style.display = 'none';
     this.canvasContext = null;
-
-    this.decodeCallback = ZXing.Runtime.addFunction(function (ptr, len, resultIndex, resultCount) {
-      let result = new Uint8Array(ZXing.HEAPU8.buffer, ptr, len);
-      let str = String.fromCharCode.apply(null, result);
-      if (resultIndex === 0) {
-        window.zxDecodeResult = '';
-      }
-      window.zxDecodeResult += str;
-    });
   }
 
   analyze() {
@@ -111,7 +77,7 @@ class Analyzer {
       return null;
     }
 
-    if (!this.imageBuffer) {
+    // if (!this.imageBuffer) {
       let videoWidth = this.video.videoWidth;
       let videoHeight = this.video.videoHeight;
 
@@ -124,9 +90,9 @@ class Analyzer {
       this.canvas.height = this.sensorHeight;
 
       this.canvasContext = this.canvas.getContext('2d');
-      this.imageBuffer = ZXing._resize(this.sensorWidth, this.sensorHeight);
-      return null;
-    }
+    //   this.imageBuffer = ZXing._resize(this.sensorWidth, this.sensorHeight);
+    //   return null;
+    // }
 
     this.canvasContext.drawImage(
       this.video,
@@ -136,23 +102,25 @@ class Analyzer {
       this.sensorHeight
     );
 
-    let data = this.canvasContext.getImageData(0, 0, this.sensorWidth, this.sensorHeight).data;
-    for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-      let [r, g, b] = [data[i], data[i + 1], data[i + 2]];
-      ZXing.HEAPU8[this.imageBuffer + j] = Math.trunc((r + g + b) / 3);
-    }
+    let data = this.canvasContext.getImageData(0, 0, this.sensorWidth, this.sensorHeight);
+    // console.log(data.length)
+    ZXingWorker.postMessage(data)
 
-    let err = ZXing._decode_qr(this.decodeCallback);
-    if (err) {
-      return null;
-    }
-
-    let result = window.zxDecodeResult;
-    if (result != null) {
-      return { result: result, canvas: this.canvas };
-    }
-
-    return null;
+    // for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    //   let [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+    //   ZXing.HEAPU8[this.imageBuffer + j] = Math.trunc((r + g + b) / 3);
+    // }
+    //
+    // let err = ZXing._decode_qr(this.decodeCallback);
+    // if (err) {
+    //   return null;
+    // }
+    //
+    // let result = window.zxDecodeResult;
+    // if (result != null) {
+    //   return { result: result, canvas: this.canvas };
+    // }
+    // return null;
   }
 }
 
